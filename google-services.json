@@ -12,7 +12,20 @@
           "package_name": "com.greeneyeapp.mailalarmlite"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "864714574387-cmk7a7so1rn3rv1s7rk4srs2j5ahoo1m.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.greeneyeapp.mailalarmlite",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "864714574387-8h2osphqh2mcnp11fcnpcrj4va1l8to9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAE4-YGZAn-kGacgcRgC6f5NSy88RtVR7k"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "864714574387-8h2osphqh2mcnp11fcnpcrj4va1l8to9.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "864714574387-c4pt8ofno625bp7021jtlsn6gfqhffbi.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.greeneyeapp.mailalarmlite"
+              }
+            }
+          ]
         }
       }
     }

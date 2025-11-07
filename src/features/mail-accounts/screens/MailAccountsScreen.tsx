@@ -10,7 +10,6 @@ import {
   useAutoDiscovery
 } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-// DÜZELTME: useState ve useEffect importları eklendi
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Button, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -22,15 +21,10 @@ WebBrowser.maybeCompleteAuthSession();
 
 // ✅ Client IDs
 const WEB_CLIENT_ID = '864714574387-8h2osphqh2mcnp11fcnpcrj4va1l8to9.apps.googleusercontent.com';
-// YENİ: Azure'da oluşturduğunuz yeni uygulamanın Client ID'si
 const MICROSOFT_CLIENT_ID = 'e3df04b4-24dc-4c66-b9d3-2811f85f1624';
-
 const MICROSOFT_DISCOVERY_URL = 'https://login.microsoftonline.com/common/v2.0';
-
-// ✅ Microsoft için Redirect URI (Bu değerin Azure'daki ile aynı olduğundan emin olun)
 const REDIRECT_URI = 'com.greeneyeapp.mailalarmlite://oauth2redirect';
 
-// Hata ayıklama için konsola yazdırma
 console.log("KULLANILAN REDIRECT URI:", REDIRECT_URI);
 
 const MailAccountsScreen = () => {
@@ -44,13 +38,10 @@ const MailAccountsScreen = () => {
   useEffect(() => {
     GoogleSignin.configure({
       webClientId: WEB_CLIENT_ID,
-      offlineAccess: true, // Sunucuda refresh token alabilmek için bu zorunludur
-      scopes: [
-        'https://www.googleapis.com/auth/gmail.readonly',
-      ],
+      offlineAccess: true,
+      scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+      forceCodeForRefreshToken: true,  // <-- EKLE
     });
-
-    console.log('✅ Google Sign-In yapılandırıldı');
   }, []);
 
   // ✅ Microsoft OAuth
@@ -67,93 +58,140 @@ const MailAccountsScreen = () => {
       ],
       redirectUri: REDIRECT_URI,
       responseType: ResponseType.Code,
-      usePKCE: false, // Sunucu tarafı akış için PKCE kapalı
+      usePKCE: false,
       prompt: Prompt.SelectAccount,
     },
     microsoftDiscovery
   );
 
+  // ✅ DÜZELTME: Microsoft OAuth response handling - isConnecting kontrolü kaldırıldı
   useEffect(() => {
-    if (isConnecting) return; // Zaten bir işlem varsa tekrar tetikleme
-    if (msResponse?.type === 'success') {
+    if (!msResponse) return;
+
+    console.log('📥 Microsoft OAuth Response:', msResponse.type);
+
+    if (msResponse.type === 'success') {
       const { code } = msResponse.params;
+      console.log('✅ Microsoft authorization code alındı');
       sendCodeToBackend(code, 'microsoft');
-    } else if (msResponse?.type === 'error') {
-      console.error('❌ Microsoft hata:', msResponse.error);
+    } else if (msResponse.type === 'error') {
+      console.error('❌ Microsoft OAuth hatası:', msResponse.error);
       Alert.alert('Microsoft Hatası', msResponse.error?.message || 'Bilinmeyen hata');
       setIsConnecting(false);
-    } else if (msResponse?.type === 'dismiss') {
+    } else if (msResponse.type === 'dismiss' || msResponse.type === 'cancel') {
+      console.log('ℹ️ Microsoft OAuth kullanıcı tarafından iptal edildi');
       setIsConnecting(false);
     }
   }, [msResponse]);
 
-  // YENİ & DÜZELTİLMİŞ: Google giriş akışı artık `serverAuthCode` kullanıyor
+  // ✅ DÜZELTME: Google giriş akışı - daha iyi hata yönetimi
   const handleGoogleLogin = async () => {
     if (!user) {
       navigation.navigate('AuthStack');
       return;
     }
-    if (isConnecting) return;
+    if (isConnecting) {
+      console.log('⚠️ Zaten bir bağlantı işlemi devam ediyor');
+      return;
+    }
+
     setIsConnecting(true);
 
     try {
       console.log('🚀 Google Sign-In başlatılıyor...');
-      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-      const { serverAuthCode } = await GoogleSignin.signIn();
 
-      if (serverAuthCode) {
-        console.log('✅ Google Server Auth Code alındı, backend\'e gönderiliyor...');
-        await sendCodeToBackend(serverAuthCode, 'google');
+      // Önce oturumu temizle
+      try {
+        await GoogleSignin.signOut();
+      } catch (signOutError) {
+        console.log('ℹ️ Önceki oturum temizleme hatası (normal olabilir):', signOutError);
+      }
+
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+      const signInResult = await GoogleSignin.signIn();
+      console.log('✅ Google Sign-In başarılı:', {
+        hasServerAuthCode: !!signInResult.serverAuthCode,
+        user: signInResult.data?.user?.email
+      });
+
+      if (signInResult.serverAuthCode) {
+        console.log('📤 Google Server Auth Code backend\'e gönderiliyor...');
+        await sendCodeToBackend(signInResult.serverAuthCode, 'google');
       } else {
         throw new Error("Google'dan sunucu yetki kodu alınamadı.");
       }
     } catch (error: any) {
-      if (error.code === 12501) { // Kullanıcı iptal etti
-        console.log('Kullanıcı Google giriş işlemini iptal etti.');
-        setIsConnecting(false);
+      console.error('❌ Google giriş hatası detayı:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
+
+      if (error.code === 12501) {
+        // Kullanıcı iptal etti
+        console.log('ℹ️ Kullanıcı Google giriş işlemini iptal etti.');
+      } else if (error.code === 10) {
+        // Developer error - configuration hatası
+        Alert.alert(
+          'Yapılandırma Hatası',
+          'Google OAuth yapılandırması tamamlanmamış. Lütfen geliştiriciyle iletişime geçin.'
+        );
       } else {
-        console.error('❌ Google giriş hatası:', error);
-        Alert.alert('Google Hatası', `Hata: ${error.message}` || 'Bilinmeyen hata');
-        setIsConnecting(false);
+        Alert.alert(
+          'Google Bağlantı Hatası',
+          `Hata Kodu: ${error.code || 'UNKNOWN'}\n${error.message || 'Bilinmeyen hata'}\n\nUygulamanın Google tarafından doğrulanması gerekiyor olabilir.`
+        );
       }
+      setIsConnecting(false);
     }
   };
 
-  // YENİ & DÜZELTİLMİŞ: Microsoft girişini tetikler
+  // ✅ Microsoft girişini tetikler
   const handleMicrosoftLogin = async () => {
     if (!user) {
       navigation.navigate('AuthStack');
       return;
     }
-    if (isConnecting) return;
+    if (isConnecting) {
+      console.log('⚠️ Zaten bir bağlantı işlemi devam ediyor');
+      return;
+    }
+
     setIsConnecting(true);
 
     try {
       console.log('🚀 Microsoft OAuth başlatılıyor...');
-      await msPromptAsync();
-    } catch (e) {
+      const result = await msPromptAsync();
+      console.log('📥 Microsoft prompt sonucu:', result?.type);
+
+      // Response useEffect'te handle edilecek, burada sadece hata kontrolü
+      if (!result) {
+        console.error('❌ Microsoft prompt sonuç döndürmedi');
+        setIsConnecting(false);
+        Alert.alert('Hata', 'Microsoft giriş ekranı yanıt vermedi');
+      }
+    } catch (e: any) {
       console.error("❌ Microsoft prompt hatası:", e);
       setIsConnecting(false);
-      Alert.alert('Hata', 'Microsoft giriş ekranı açılamadı');
+      Alert.alert('Hata', `Microsoft giriş ekranı açılamadı: ${e.message}`);
     }
   };
 
-  // YENİ & BİRLEŞTİRİLMİŞ: Hem Google hem Microsoft için tek backend fonksiyonu
+  // ✅ DÜZELTME: Hem Google hem Microsoft için tek backend fonksiyonu - geliştirilmiş hata yönetimi
   const sendCodeToBackend = async (code: string, provider: 'google' | 'microsoft') => {
     if (!user) {
       setIsConnecting(false);
       return;
-    };
-
-    // isConnecting zaten true olmalı, ama garantiye alalım
-    if (!isConnecting) setIsConnecting(true);
+    }
 
     try {
-      // Hangi Firebase Cloud Function'ın çağrılacağını belirle
       const functionName = provider === 'google' ? 'connectgoogleaccount' : 'connectmicrosoftaccount';
       const connectFunction = httpsCallable(undefined, functionName);
 
       console.log(`📤 ${provider} backend'e gönderiliyor...`);
+      console.log(`📤 Function name: ${functionName}`);
+      console.log(`📤 Redirect URI: ${REDIRECT_URI}`);
 
       const result: any = await connectFunction({
         authCode: code,
@@ -164,15 +202,32 @@ const MailAccountsScreen = () => {
 
       if (result.data.status === 'success') {
         Alert.alert('Başarılı', `${result.data.email} başarıyla bağlandı.`);
-        // Firestore onSnapshot zaten listeyi güncelleyeceği için fetchAccounts() çağırmaya gerek yok.
+        setIsConnecting(false);
       } else {
         throw new Error(result.data.message || 'Bilinmeyen bir backend hatası oluştu.');
       }
     } catch (error: any) {
-      // Hatanın tüm detaylarını görmek için objenin tamamını loglayalım
-      console.error(`❌ ${provider} backend hatası DETAY:`, JSON.stringify(error, null, 2));
-      Alert.alert('Bağlantı Hatası', `Kod: ${error.code} - Mesaj: ${error.message}` || 'Sunucuyla iletişim kurulamadı.');
-    } finally {
+      console.error(`❌ ${provider} backend hatası DETAY:`, {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        fullError: JSON.stringify(error, null, 2)
+      });
+
+      let errorMessage = 'Sunucuyla iletişim kurulamadı.';
+
+      if (error.code === 'functions/unauthenticated') {
+        errorMessage = 'Oturum süreniz dolmuş. Lütfen yeniden giriş yapın.';
+      } else if (error.code === 'functions/failed-precondition') {
+        errorMessage = error.message || 'Önkoşul hatası.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      Alert.alert(
+        'Bağlantı Hatası',
+        `${errorMessage}\n\nHata Kodu: ${error.code || 'UNKNOWN'}`
+      );
       setIsConnecting(false);
     }
   };

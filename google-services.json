@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "864714574387",
+    "project_id": "mail-alarm-lite",
+    "storage_bucket": "mail-alarm-lite.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:864714574387:android:435b9e6d395f265e817146",
+        "android_client_info": {
+          "package_name": "com.greeneyeapp.mailalarmlite"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAE4-YGZAn-kGacgcRgC6f5NSy88RtVR7k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

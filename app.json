@@ -32,6 +32,7 @@
       "package": "com.greeneyeapp.mailalarmlite",
       "googleServicesFile": "./google-services.json",
       "edgeToEdgeEnabled": true,
+      "launchMode": "singleTask",
       "predictiveBackGestureEnabled": false,
       "intentFilters": [
         {

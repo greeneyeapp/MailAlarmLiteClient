@@ -1,17 +1,28 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import firestore from '@react-native-firebase/firestore';
-import { httpsCallable } from '@react-native-firebase/functions';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import functions from '@react-native-firebase/functions';
 import { useNavigation } from '@react-navigation/native';
+import * as AuthSession from 'expo-auth-session';
 import {
   Prompt,
   ResponseType,
   useAuthRequest,
-  useAutoDiscovery
+  useAutoDiscovery,
 } from 'expo-auth-session';
+import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Button, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Button,
+  FlatList,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../../core/constants/Colors';
@@ -20,12 +31,25 @@ import { useAuth } from '../../auth/context/AuthContext';
 WebBrowser.maybeCompleteAuthSession();
 
 // ✅ Client IDs
-const WEB_CLIENT_ID = '864714574387-8h2osphqh2mcnp11fcnpcrj4va1l8to9.apps.googleusercontent.com';
-const MICROSOFT_CLIENT_ID = 'e3df04b4-24dc-4c66-b9d3-2811f85f1624';
-const MICROSOFT_DISCOVERY_URL = 'https://login.microsoftonline.com/common/v2.0';
-const REDIRECT_URI = 'com.greeneyeapp.mailalarmlite://oauth2redirect';
+// ÖNEMLİ: Google Cloud Console'dan aldığın "Web application" tipi OAuth Client ID'sini buraya yapıştır.
+const WEB_CLIENT_ID = '864714574387-mcid117mjpbq8tvffudvrt38624lbh6r.apps.googleusercontent.com';
 
-console.log("KULLANILAN REDIRECT URI:", REDIRECT_URI);
+const MICROSOFT_CLIENT_ID = 'e3df04b4-24dc-4c66-b9d3-2811f85f1624';
+const MICROSOFT_DISCOVERY_URL =
+  'https://login.microsoftonline.com/common/v2.0';
+
+// ✅ Yönlendirme URI'leri (Redirect URIs)
+// Bu URI'leri Google/Microsoft panellerine eklemelisin.
+const GOOGLE_REDIRECT_URI = AuthSession.makeRedirectUri({
+  useProxy: true,
+});
+const MICROSOFT_REDIRECT_URI = AuthSession.makeRedirectUri({
+  scheme: 'com.greeneyeapp.mailalarmlite',
+  path: 'oauth2redirect/microsoft',
+});
+
+console.log('KULLANILAN GOOGLE REDIRECT URI:', GOOGLE_REDIRECT_URI);
+console.log('KULLANILAN MICROSOFT REDIRECT URI:', MICROSOFT_REDIRECT_URI);
 
 const MailAccountsScreen = () => {
   const { user } = useAuth();
@@ -34,15 +58,34 @@ const MailAccountsScreen = () => {
   const [loading, setLoading] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
 
-  // ✅ Google Sign-In Yapılandırması
+  // ✅ Google OAuth - expo-auth-session ile
+  const [googleRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
+    clientId: WEB_CLIENT_ID, // Sadece "Web application" Client ID'si
+    scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+    responseType: ResponseType.Code,
+    redirectUri: GOOGLE_REDIRECT_URI,
+  });
+
+  // ✅ Google OAuth response handling
   useEffect(() => {
-    GoogleSignin.configure({
-      webClientId: WEB_CLIENT_ID,
-      offlineAccess: true,
-      scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
-      forceCodeForRefreshToken: true,  // <-- EKLE
-    });
-  }, []);
+    if (!googleResponse) return;
+
+    if (googleResponse.type === 'success') {
+      const { code } = googleResponse.params;
+      console.log('✅ Google authorization code alındı');
+      sendCodeToBackend(code, 'google');
+    } else if (
+      googleResponse.type !== 'dismiss' &&
+      googleResponse.type !== 'cancel'
+    ) {
+      console.error('❌ Google OAuth hatası:', googleResponse);
+      Alert.alert('Google Hatası', 'Giriş işlemi başarısız oldu.');
+      setIsConnecting(false);
+    } else {
+      console.log('ℹ️ Google OAuth kullanıcı tarafından iptal edildi');
+      setIsConnecting(false);
+    }
+  }, [googleResponse]);
 
   // ✅ Microsoft OAuth
   const microsoftDiscovery = useAutoDiscovery(MICROSOFT_DISCOVERY_URL);
@@ -54,97 +97,44 @@ const MailAccountsScreen = () => {
         'profile',
         'email',
         'offline_access',
-        'https://graph.microsoft.com/Mail.Read'
+        'https://graph.microsoft.com/Mail.Read',
       ],
-      redirectUri: REDIRECT_URI,
+      redirectUri: MICROSOFT_REDIRECT_URI,
       responseType: ResponseType.Code,
       usePKCE: false,
       prompt: Prompt.SelectAccount,
     },
-    microsoftDiscovery
+    microsoftDiscovery,
   );
 
-  // ✅ DÜZELTME: Microsoft OAuth response handling - isConnecting kontrolü kaldırıldı
+  // ✅ Microsoft OAuth response handling
   useEffect(() => {
     if (!msResponse) return;
-
-    console.log('📥 Microsoft OAuth Response:', msResponse.type);
 
     if (msResponse.type === 'success') {
       const { code } = msResponse.params;
       console.log('✅ Microsoft authorization code alındı');
       sendCodeToBackend(code, 'microsoft');
-    } else if (msResponse.type === 'error') {
-      console.error('❌ Microsoft OAuth hatası:', msResponse.error);
-      Alert.alert('Microsoft Hatası', msResponse.error?.message || 'Bilinmeyen hata');
+    } else if (msResponse.type !== 'dismiss' && msResponse.type !== 'cancel') {
+      console.error('❌ Microsoft OAuth hatası:', msResponse);
+      Alert.alert('Microsoft Hatası', 'Giriş işlemi başarısız oldu.');
       setIsConnecting(false);
-    } else if (msResponse.type === 'dismiss' || msResponse.type === 'cancel') {
+    } else {
       console.log('ℹ️ Microsoft OAuth kullanıcı tarafından iptal edildi');
       setIsConnecting(false);
     }
   }, [msResponse]);
 
-  // ✅ DÜZELTME: Google giriş akışı - daha iyi hata yönetimi
+  // ✅ Google giriş akışı
   const handleGoogleLogin = async () => {
     if (!user) {
       navigation.navigate('AuthStack');
       return;
     }
-    if (isConnecting) {
-      console.log('⚠️ Zaten bir bağlantı işlemi devam ediyor');
-      return;
-    }
+    if (isConnecting) return;
 
     setIsConnecting(true);
-
-    try {
-      console.log('🚀 Google Sign-In başlatılıyor...');
-
-      // Önce oturumu temizle
-      try {
-        await GoogleSignin.signOut();
-      } catch (signOutError) {
-        console.log('ℹ️ Önceki oturum temizleme hatası (normal olabilir):', signOutError);
-      }
-
-      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-
-      const signInResult = await GoogleSignin.signIn();
-      console.log('✅ Google Sign-In başarılı:', {
-        hasServerAuthCode: !!signInResult.serverAuthCode,
-        user: signInResult.data?.user?.email
-      });
-
-      if (signInResult.serverAuthCode) {
-        console.log('📤 Google Server Auth Code backend\'e gönderiliyor...');
-        await sendCodeToBackend(signInResult.serverAuthCode, 'google');
-      } else {
-        throw new Error("Google'dan sunucu yetki kodu alınamadı.");
-      }
-    } catch (error: any) {
-      console.error('❌ Google giriş hatası detayı:', {
-        code: error.code,
-        message: error.message,
-        stack: error.stack
-      });
-
-      if (error.code === 12501) {
-        // Kullanıcı iptal etti
-        console.log('ℹ️ Kullanıcı Google giriş işlemini iptal etti.');
-      } else if (error.code === 10) {
-        // Developer error - configuration hatası
-        Alert.alert(
-          'Yapılandırma Hatası',
-          'Google OAuth yapılandırması tamamlanmamış. Lütfen geliştiriciyle iletişime geçin.'
-        );
-      } else {
-        Alert.alert(
-          'Google Bağlantı Hatası',
-          `Hata Kodu: ${error.code || 'UNKNOWN'}\n${error.message || 'Bilinmeyen hata'}\n\nUygulamanın Google tarafından doğrulanması gerekiyor olabilir.`
-        );
-      }
-      setIsConnecting(false);
-    }
+    await googlePromptAsync();
   };
 
   // ✅ Microsoft girişini tetikler
@@ -153,32 +143,13 @@ const MailAccountsScreen = () => {
       navigation.navigate('AuthStack');
       return;
     }
-    if (isConnecting) {
-      console.log('⚠️ Zaten bir bağlantı işlemi devam ediyor');
-      return;
-    }
+    if (isConnecting) return;
 
     setIsConnecting(true);
-
-    try {
-      console.log('🚀 Microsoft OAuth başlatılıyor...');
-      const result = await msPromptAsync();
-      console.log('📥 Microsoft prompt sonucu:', result?.type);
-
-      // Response useEffect'te handle edilecek, burada sadece hata kontrolü
-      if (!result) {
-        console.error('❌ Microsoft prompt sonuç döndürmedi');
-        setIsConnecting(false);
-        Alert.alert('Hata', 'Microsoft giriş ekranı yanıt vermedi');
-      }
-    } catch (e: any) {
-      console.error("❌ Microsoft prompt hatası:", e);
-      setIsConnecting(false);
-      Alert.alert('Hata', `Microsoft giriş ekranı açılamadı: ${e.message}`);
-    }
+    await msPromptAsync();
   };
 
-  // ✅ DÜZELTME: Hem Google hem Microsoft için tek backend fonksiyonu - geliştirilmiş hata yönetimi
+  // ✅ Backend'e kod gönderme
   const sendCodeToBackend = async (code: string, provider: 'google' | 'microsoft') => {
     if (!user) {
       setIsConnecting(false);
@@ -186,48 +157,46 @@ const MailAccountsScreen = () => {
     }
 
     try {
-      const functionName = provider === 'google' ? 'connectgoogleaccount' : 'connectmicrosoftaccount';
-      const connectFunction = httpsCallable(undefined, functionName);
+      const functionName =
+        provider === 'google'
+          ? 'connectGoogleAccount'
+          : 'connectMicrosoftAccount';
 
       console.log(`📤 ${provider} backend'e gönderiliyor...`);
-      console.log(`📤 Function name: ${functionName}`);
-      console.log(`📤 Redirect URI: ${REDIRECT_URI}`);
+      const functionsInstance = (functions() as any).region('europe-west3');
+      const connectFunction = functionsInstance.httpsCallable(functionName);
 
       const result: any = await connectFunction({
         authCode: code,
-        redirectUri: REDIRECT_URI,
+        redirectUri:
+          provider === 'google' ? GOOGLE_REDIRECT_URI : MICROSOFT_REDIRECT_URI,
       });
 
       console.log(`📥 ${provider} backend cevabı:`, result.data);
 
       if (result.data.status === 'success') {
         Alert.alert('Başarılı', `${result.data.email} başarıyla bağlandı.`);
-        setIsConnecting(false);
       } else {
-        throw new Error(result.data.message || 'Bilinmeyen bir backend hatası oluştu.');
+        throw new Error(
+          result.data.message || 'Bilinmeyen bir backend hatası oluştu.',
+        );
       }
     } catch (error: any) {
       console.error(`❌ ${provider} backend hatası DETAY:`, {
         code: error.code,
         message: error.message,
         details: error.details,
-        fullError: JSON.stringify(error, null, 2)
       });
 
       let errorMessage = 'Sunucuyla iletişim kurulamadı.';
-
       if (error.code === 'functions/unauthenticated') {
         errorMessage = 'Oturum süreniz dolmuş. Lütfen yeniden giriş yapın.';
-      } else if (error.code === 'functions/failed-precondition') {
-        errorMessage = error.message || 'Önkoşul hatası.';
       } else if (error.message) {
         errorMessage = error.message;
       }
 
-      Alert.alert(
-        'Bağlantı Hatası',
-        `${errorMessage}\n\nHata Kodu: ${error.code || 'UNKNOWN'}`
-      );
+      Alert.alert('Bağlantı Hatası', errorMessage);
+    } finally {
       setIsConnecting(false);
     }
   };
@@ -239,17 +208,20 @@ const MailAccountsScreen = () => {
         .collection('users')
         .doc(user.id)
         .collection('mailAccounts')
-        .onSnapshot(querySnapshot => {
-          const accountsList: any[] = [];
-          querySnapshot.forEach(doc => {
-            accountsList.push({ id: doc.id, ...doc.data() });
-          });
-          setAccounts(accountsList);
-          setLoading(false);
-        }, (error) => {
-          console.error("❌ Hesapları çekerken hata:", error);
-          setLoading(false);
-        });
+        .onSnapshot(
+          querySnapshot => {
+            const accountsList: any[] = [];
+            querySnapshot.forEach(doc => {
+              accountsList.push({ id: doc.id, ...doc.data() });
+            });
+            setAccounts(accountsList);
+            setLoading(false);
+          },
+          error => {
+            console.error('❌ Hesapları çekerken hata:', error);
+            setLoading(false);
+          },
+        );
       return () => subscriber();
     } else {
       setAccounts([]);
@@ -280,9 +252,9 @@ const MailAccountsScreen = () => {
             } catch (error) {
               Alert.alert('Hata', 'Hesap silinirken bir sorun oluştu.');
             }
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
@@ -299,9 +271,10 @@ const MailAccountsScreen = () => {
         <View style={styles.logoContainer}>
           <Image
             source={{
-              uri: item.provider === 'google'
-                ? 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/768px-Google_%22G%22_logo.svg.png'
-                : 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/Microsoft_Office_15_Logo.svg/800px-Microsoft_Office_15_Logo.svg.png'
+              uri:
+                item.provider === 'google'
+                  ? 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/768px-Google_%22G%22_logo.svg.png'
+                  : 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/Microsoft_Office_15_Logo.svg/800px-Microsoft_Office_15_Logo.svg.png',
             }}
             style={styles.logo}
           />
@@ -319,7 +292,10 @@ const MailAccountsScreen = () => {
         <Text style={styles.guestSubtitle}>
           Google veya Outlook hesaplarınızı bağlayarak mail alarmları oluşturmak için lütfen giriş yapın.
         </Text>
-        <Button title="Giriş Yap / Kayıt Ol" onPress={() => navigation.navigate('AuthStack')} />
+        <Button
+          title="Giriş Yap / Kayıt Ol"
+          onPress={() => navigation.navigate('AuthStack')}
+        />
       </SafeAreaView>
     );
   }
@@ -344,8 +320,9 @@ const MailAccountsScreen = () => {
         renderItem={renderItem}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.list}
-        ListEmptyComponent={() => (
-          !loading && !isConnecting && (
+        ListEmptyComponent={() =>
+          !loading &&
+          !isConnecting && (
             <View style={styles.providerContainer}>
               <Text style={styles.providerHeader}>Hangi hesabı eklemek istersiniz?</Text>
               <ProviderButton
@@ -362,7 +339,7 @@ const MailAccountsScreen = () => {
               />
             </View>
           )
-        )}
+        }
       />
 
       {accounts.length > 0 && !loading && !isConnecting && (
@@ -373,10 +350,9 @@ const MailAccountsScreen = () => {
               Alert.alert('Hesap Ekle', 'Hangi hesabı eklemek istersiniz?', [
                 { text: 'Google', onPress: handleGoogleLogin },
                 { text: 'Microsoft', onPress: handleMicrosoftLogin },
-                { text: 'İptal', style: 'cancel' }
+                { text: 'İptal', style: 'cancel' },
               ]);
-            }}
-          >
+            }}>
             <MaterialIcons name="add" size={24} color="white" />
             <Text style={styles.addButtonText}>Yeni Hesap Ekle</Text>
           </TouchableOpacity>
@@ -387,7 +363,9 @@ const MailAccountsScreen = () => {
 };
 
 const ProviderButton = ({ provider, icon, color, onPress }: any) => (
-  <TouchableOpacity style={[styles.providerButton, { borderColor: color + '50' }]} onPress={onPress}>
+  <TouchableOpacity
+    style={[styles.providerButton, { borderColor: color + '50' }]}
+    onPress={onPress}>
     <MaterialIcons name={icon} size={24} color={color} />
     <Text style={styles.providerButtonText}>{provider}</Text>
   </TouchableOpacity>

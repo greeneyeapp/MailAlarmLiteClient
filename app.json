@@ -83,6 +83,12 @@
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "8d1a2380-e353-49e5-8d56-7bd6c998548b"
+      }
+    },
+    "owner": "muhammedbozkurt"
   }
 }

@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "864714574387-cmk7a7so1rn3rv1s7rk4srs2j5ahoo1m.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.greeneyeapp.mailalarmlite",
+            "certificate_hash": "3a56275823bb3fa63fd77a881cbf15cca8cb9edf"
+          }
+        },
+        {
           "client_id": "864714574387-8h2osphqh2mcnp11fcnpcrj4va1l8to9.apps.googleusercontent.com",
           "client_type": 3
         }
